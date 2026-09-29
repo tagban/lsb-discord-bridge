@@ -1,0 +1,15 @@
+# systemd unit for the bridge's bot. Copy to /etc/systemd/system/, change the paths, then:
+#   systemctl daemon-reload && systemctl enable --now lsb-discord-bridge
+[Unit]
+Description=LandSandBoat Discord bridge
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+WorkingDirectory=/opt/lsb-discord-bridge/bot
+ExecStart=/opt/lsb-discord-bridge/bot/venv/bin/python bridge.py config.toml
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

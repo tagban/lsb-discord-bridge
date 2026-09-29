@@ -1,0 +1,73 @@
+# The Discord bridge's bot: copy this to config.toml and change it for your server.
+# Secrets (the bot's token, the database password, webhook URLs) are best kept out of this file:
+# name an environment variable with <setting>_env, and put the value there or in server.env_file.
+
+[discord]
+token_env = "DISCORD_BOT_TOKEN"   # the bot's token (Discord developer portal, Bot, Reset Token)
+guild_id = 0                      # your Discord server's id (right-click it, Copy Server ID)
+
+[database]
+host = "127.0.0.1"
+port = 3306
+user_env = "MARIADB_USER"          # or: user = "xiadmin"
+password_env = "MARIADB_PASSWORD"
+database_env = "MARIADB_DATABASE"  # or: database = "xidb"
+
+[server]
+# Your LandSandBoat folder: the bot reads its IPC message numbers (tools/generate_ipc_stubs.py) and
+# the game version (settings/login.lua) there.
+lsb_path = "/opt/docker/landsandboat"
+# The world server's IPC port, as the bot reaches it. With Docker, publish it to this machine only:
+#   world:  ports: ["127.0.0.1:54003:54003"]
+world = "127.0.0.1:54003"
+# A KEY=value file to read secrets from (a Docker setup's .env); leave empty to use the environment.
+env_file = "/opt/docker/landsandboat/.env"
+
+[status]
+enabled = true
+# The bot's nickname: {online} is the number of characters online.
+nickname_up = "Up - {online} Online"
+nickname_down = "Down"
+# Up when these Docker Compose services all run; leave compose_file empty to judge by the database.
+compose_file = "/opt/docker/landsandboat/docker-compose.yml"
+needed = ["database", "connect", "search", "world", "map"]
+# The bot's status line: {version} is the game client version the server takes (CLIENT_VER).
+show_game_version = true
+activity = "Game version {version}"
+
+[chat]
+keep_days = 7   # recorded lines older than this are deleted
+
+# One [[bridge]] per Discord channel. Each says what comes from the game (from_game) and where what is
+# written in the channel goes in the game (to_game). The module only records what
+# settings/discord_bridge.lua turns on (RECORD_SAY, RECORD_LINKSHELL, ...).
+#
+# from_game: "SAY", "SHOUT", "YELL", "ASSIST_E", "ASSIST_J", "LINKSHELL" (every linkshell),
+#            "LINKSHELL:<name>" (one), "UNITY" (every unity), "UNITY:<leader id>" (one)
+# to_game:   "say", "shout", "yell" (to every zone, as that kind of line), "system" (a server message),
+#            "linkshell:<name>", "unity" (every unity) or "unity:<leader id>", "assist_e", "assist_j",
+#            or "" (nothing goes to the game: a read-only channel)
+
+[[bridge]]
+channel = 0                              # the Discord channel's id (right-click it, Copy Channel ID)
+from_game = ["SAY", "SHOUT", "YELL"]
+to_game = "say"
+logins = true                            # "<name> has logged in." / "has logged out."
+badges = true                            # post as the speaker, with their main job's badge
+# webhook_env = "DISCORD_WORLD_WEBHOOK"  # a webhook you made for this channel (its URL in that variable);
+                                         # without one, the bot makes its own (needs Manage Webhooks)
+name_suffix = "[D]"                      # after a Discord name in the game: "Name[D] : hello"
+max_length = 110                         # of a Discord line in the game
+
+# A linkshell's own channel, both ways (needs RECORD_LINKSHELL = true):
+# [[bridge]]
+# channel = 0
+# from_game = ["LINKSHELL:MyShell"]
+# to_game = "linkshell:MyShell"
+# badges = true
+
+# Unity chat, both ways (needs RECORD_UNITY = true):
+# [[bridge]]
+# channel = 0
+# from_game = ["UNITY"]
+# to_game = "unity"
