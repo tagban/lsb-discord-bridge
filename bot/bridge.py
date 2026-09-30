@@ -342,7 +342,8 @@ async def on_message(msg: discord.Message):
 
 async def chat_loop():
     """Every 2 seconds, the lines recorded since the last look; every 10, who logged in or out.
-    Starting, and after the database was unreachable, it only notes where things are."""
+    Starting, it only notes where things are. Through a database hiccup it keeps its place,
+    so what was said meanwhile still reaches Discord once the database answers again."""
     last = None
     online = None
     tick = 0
@@ -358,6 +359,11 @@ async def chat_loop():
                     "WHERE id > %s ORDER BY id LIMIT 50",
                     (last,),
                 )
+                if not rows and tick % 30 == 0:
+                    # The table was emptied or recreated (a reinstall): start from where it is now.
+                    newest = (await asyncio.to_thread(query, "SELECT COALESCE(MAX(id), 0) FROM discord_bridge_chat"))[0][0]
+                    if newest < last:
+                        last = newest
                 for rid, speaker, kind, grp, leader, mjob, mlvl, sjob, slvl, message in rows:
                     last = max(last, rid)
                     line = from_game(message)
@@ -384,8 +390,7 @@ async def chat_loop():
                 await asyncio.to_thread(query, "DELETE FROM discord_bridge_chat WHERE at < NOW() - INTERVAL %s DAY", (KEEP_DAYS,))
         except Exception as e:
             print(f"Chat: {e}")
-            last = None
-            online = None
+            online = None  # don't announce everyone as logging in when it's back
         tick += 1
         await asyncio.sleep(2)
 
@@ -442,9 +447,19 @@ async def online(interaction: discord.Interaction):
         await interaction.response.send_message("The server's database is not answering (it may be down).")
 
 
+_started = False
+
+
 @client.event
 async def on_ready():
+    """Discord calls this after every fresh session, not just the first: the loops and
+    the command sync happen once, or each reconnect would add another copy of each loop
+    (and every game line would be posted twice, three times, ...)."""
+    global _started
     print(f"Bridge bot online as {client.user}; {len(BRIDGES)} channel(s); reading Discord: {READS}")
+    if _started:
+        return
+    _started = True
     if GUILD:
         await tree.sync(guild=GUILD)
     if STATUS.get("enabled", True):
