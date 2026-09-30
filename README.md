@@ -47,6 +47,9 @@ recorded.
 
 ## Installing
 
+The step-by-step for LandSandBoat, built from source or with Docker (and a LandSandBoat Docker build
+problem worth knowing about), is [docs/USING-WITH-LSB.md](docs/USING-WITH-LSB.md).
+
 ### 1. The module (on the server)
 
 Copy `module/discord_bridge` into your server's `modules/` folder, and list it in `modules/init.txt`:
@@ -158,6 +161,13 @@ font and run it to make your own. No game art is used.
   from the game are never pings.
 - The Discord-to-game side uses LandSandBoat's IPC as it is today; if a LandSandBoat update changes
   the chat messages' fields, the bot's encoders (`bridge.py`, "the game's IPC") change with it.
+
+## announce.py
+
+LandSandBoat's `tools/announce.py` (a server message to every player) stopped working in August 2026,
+when its IPC moved to fixed-length encoding. The fix was offered to LandSandBoat
+([#11663](https://github.com/LandSandBoat/server/pull/11663)); until your LandSandBoat has it,
+[`tools/announce.py`](tools/announce.py) here is the fixed one.
 
 ## License
 
