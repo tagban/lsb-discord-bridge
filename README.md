@@ -12,8 +12,12 @@ players online are rarely in the same place.
 - **Discord to game**: what is written in a channel reaches the game as a Say, Shout or Yell (to every
   zone), a server message, a linkshell's chat, Unity chat or an Assist channel.
 - **Worldwide chat** (optional): Say, Shout and/or Yell reach everyone, wherever they are.
-- **Logins and logouts** in Discord, the bot's nickname showing whether the server is up and how many
-  are online, its status the game version the server takes, and `/online`.
+- **Who's online** in Discord: a roll call every half hour (or as often as you like), only when
+  someone is on, with each one's nation, jobs and zone (players set to /anon show their name and
+  nation only), or a post for every login and logout if you prefer. `/online` shows it any time.
+- **Logins in the game**: "Tagban has logged in." as a server message in every zone, if you like.
+- The bot's nickname showing whether the server is up and how many are online, and its status the
+  game version the server takes.
 - Nothing of LandSandBoat's is changed: a module, a settings file and a table, so its updates don't
   undo it.
 

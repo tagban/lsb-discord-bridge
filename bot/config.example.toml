@@ -38,6 +38,12 @@ activity = "Game version {version}"
 [chat]
 keep_days = 7   # recorded lines older than this are deleted
 
+[game]
+# A server message in every zone when someone logs in (sent by the bot, like tools/announce.py).
+# {name} is the character, {nation} their nation (San d'Oria, Bastok or Windurst).
+announce_logins = false
+login_message = "{name} has logged in."
+
 # One [[bridge]] per Discord channel. Each says what comes from the game (from_game) and where what is
 # written in the channel goes in the game (to_game). The module only records what
 # settings/discord_bridge.lua turns on (RECORD_SAY, RECORD_LINKSHELL, ...).
@@ -52,7 +58,11 @@ keep_days = 7   # recorded lines older than this are deleted
 channel = 0                              # the Discord channel's id (right-click it, Copy Channel ID)
 from_game = ["SAY", "SHOUT", "YELL"]
 to_game = "say"
-logins = true                            # "<name> has logged in." / "has logged out."
+logins = false                           # "<name> has logged in." / "has logged out.", each time
+roll_call = 30                           # every 30 minutes (on the clock), if anyone's online: each one's
+                                         # nation, name, jobs and zone (/anon: name and nation); 0 = never
+# nation_emoji = ["🏰", "⚙️", "⭐"]        # San d'Oria, Bastok, Windurst; your Discord server's own
+                                         # emoji by name work too: [":sand:", ":bastok:", ":windy:"]
 badges = true                            # post as the speaker, with their main job's badge
 # webhook_env = "DISCORD_WORLD_WEBHOOK"  # a webhook you made for this channel (its URL in that variable);
                                          # without one, the bot makes its own (needs Manage Webhooks)

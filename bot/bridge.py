@@ -1,6 +1,6 @@
 """The Discord bridge's bot, for a LandSandBoat server: game chat into Discord channels (as its
-speakers, with a badge for their job), Discord into the game's chat, logins and logouts, and the
-server's state as the bot's nickname. What goes where is config.toml (see config.example.toml).
+speakers, with a badge for their job), Discord into the game's chat, a roll call of who's online
+(or each login and logout), logins announced in the game, and the server's state as the bot's nickname. What goes where is config.toml (see config.example.toml).
 
     python3 bridge.py [config.toml]
 
@@ -17,6 +17,7 @@ import socket
 import struct
 import subprocess
 import sys
+import time
 import tomllib
 import unicodedata
 
@@ -24,6 +25,8 @@ import discord
 import mysql.connector
 import zmq
 from discord import app_commands
+
+import roster
 
 sys.stdout.reconfigure(line_buffering=True)  # to a service's log as printed
 
@@ -76,10 +79,10 @@ WORLD = (world_host or "127.0.0.1", int(world_port or 54003))
 STATUS = CONFIG.get("status", {})
 BRIDGES = CONFIG.get("bridge", [])
 KEEP_DAYS = int(CONFIG.get("chat", {}).get("keep_days", 7))
+GAME = CONFIG.get("game", {})
 BADGES = os.path.join(HERE, "badges")
 
-JOBS = ["", "WAR", "MNK", "WHM", "BLM", "RDM", "THF", "PLD", "DRK", "BST", "BRD", "RNG", "SAM", "NIN",
-        "DRG", "SMN", "BLU", "COR", "PUP", "DNC", "SCH", "GEO", "RUN"]
+JOBS = roster.JOBS
 KIND_LABEL = {"SAY": "Say", "SHOUT": "Shout", "YELL": "Yell", "LINKSHELL": "LS", "UNITY": "Unity",
               "ASSIST_E": "Assist", "ASSIST_J": "Assist (J)"}
 
@@ -112,6 +115,16 @@ def ensure_table():
 def online_characters():
     rows = query("SELECT c.charname FROM chars c INNER JOIN accounts_sessions s ON c.charid = s.charid ORDER BY c.charname")
     return [r[0] for r in rows]
+
+
+def online_players():
+    """Everyone online, with what the roll call shows (see roster.roll_call)."""
+    rows = query("SELECT c.charname, c.nation, z.name, c.settings, cs.mjob, cs.mlvl, cs.sjob, cs.slvl "
+                 "FROM accounts_sessions s INNER JOIN chars c ON c.charid = s.charid "
+                 "LEFT JOIN char_stats cs ON cs.charid = c.charid "
+                 "LEFT JOIN zone_settings z ON z.zoneid = c.pos_zone ORDER BY c.charname")
+    keys = ("name", "nation", "zone", "settings", "mjob", "mlvl", "sjob", "slvl")
+    return [dict(zip(keys, r)) for r in rows]
 
 
 def game_version():
@@ -181,6 +194,11 @@ def to_world(message):
         _world.setsockopt(zmq.LINGER, 0)
         _world.connect(f"tcp://{WORLD[0]}:{WORLD[1]}")
     _world.send(message, zmq.NOBLOCK)
+
+
+def announce_in_game(msg):
+    """A server message to every zone (as tools/announce.py sends)."""
+    to_world(server_message("", msg, MESSAGE["system"]))
 
 
 def say_in_game(target, sender, msg):
@@ -374,18 +392,29 @@ async def chat_loop():
                         if channel and matches(bridge, kind, grp, leader):
                             await poster.post(channel, speaker, kind, grp, mjob, mlvl, sjob, slvl, line)
 
-            if tick % 5 == 0 and any(b.get("logins") for b in BRIDGES):
-                now = set(await asyncio.to_thread(online_characters))
+            if tick % 5 == 0 and (any(b.get("logins") for b in BRIDGES) or GAME.get("announce_logins")):
+                players = await asyncio.to_thread(online_players)
+                now = {p["name"] for p in players}
                 if online is not None:
+                    came = sorted(now - online)
                     for bridge in BRIDGES:
                         channel = client.get_channel(int(bridge.get("channel", 0)))
                         if not (channel and bridge.get("logins")):
                             continue
-                        for name in sorted(now - online):
+                        for name in came:
                             await channel.send(f"\U0001F7E2 **{discord.utils.escape_markdown(name)}** has logged in.", allowed_mentions=NO_PINGS)
                         for name in sorted(online - now):
                             await channel.send(f"⚪ **{discord.utils.escape_markdown(name)}** has logged out.", allowed_mentions=NO_PINGS)
+                    if GAME.get("announce_logins") and came:
+                        nations = {p["name"]: p["nation"] for p in players}
+                        for name in came:
+                            try:
+                                await asyncio.to_thread(announce_in_game, roster.login_line(
+                                    GAME.get("login_message", "{name} has logged in."), name, nations.get(name)))
+                            except Exception as e:
+                                print(f"Login announcement: {e}")
                 online = now
+            await roll_calls()
             if tick % 43200 == 0:  # daily: lines older than keep_days
                 await asyncio.to_thread(query, "DELETE FROM discord_bridge_chat WHERE at < NOW() - INTERVAL %s DAY", (KEEP_DAYS,))
         except Exception as e:
@@ -393,6 +422,41 @@ async def chat_loop():
             online = None  # don't announce everyone as logging in when it's back
         tick += 1
         await asyncio.sleep(2)
+
+
+def server_emoji(names):
+    """The Discord server's own emoji written by name (":sand:") as Discord needs them
+    ("<:sand:1234...>"); anything else (plain emoji, or already in that form) as it is."""
+    if not names:
+        return names
+    guild = client.get_guild(GUILD_ID)
+    found = {e.name: str(e) for e in guild.emojis} if guild else {}
+    return [found.get(n[1:-1], n) if re.fullmatch(r":\w+:", n or "") else n for n in names]
+
+
+_roll_slots = {}
+
+
+async def roll_calls():
+    """Each bridge with roll_call = N posts who's online every N minutes, on the clock (:00 and
+    :30 for 30), and only when someone is. A restart doesn't post one early."""
+    due = []
+    for i, bridge in enumerate(BRIDGES):
+        minutes = int(bridge.get("roll_call", 0) or 0)
+        if minutes <= 0:
+            continue
+        slot = int(time.time() // (minutes * 60))
+        if _roll_slots.setdefault(i, slot) != slot:
+            _roll_slots[i] = slot
+            due.append(bridge)
+    if not due:
+        return
+    players = await asyncio.to_thread(online_players)
+    for bridge in due:
+        text = roster.roll_call(players, server_emoji(bridge.get("nation_emoji")), discord.utils.escape_markdown)
+        channel = client.get_channel(int(bridge.get("channel", 0)))
+        if text and channel:
+            await channel.send(text[:2000], allowed_mentions=NO_PINGS)
 
 
 def server_up():
@@ -440,9 +504,11 @@ async def status_loop():
 @tree.command(name="online", description="Who is online in the game", guild=GUILD)
 async def online(interaction: discord.Interaction):
     try:
-        chars = await asyncio.to_thread(online_characters)
+        players = await asyncio.to_thread(online_players)
         await interaction.response.send_message(
-            f"**Online ({len(chars)}):** ```{', '.join(chars)}```" if chars else "No one is online right now.")
+            (roster.roll_call(players, server_emoji(next((b.get("nation_emoji") for b in BRIDGES if b.get("nation_emoji")), None)),
+                              discord.utils.escape_markdown) or "No one is online right now.")[:2000],
+            allowed_mentions=NO_PINGS)
     except Exception:
         await interaction.response.send_message("The server's database is not answering (it may be down).")
 
